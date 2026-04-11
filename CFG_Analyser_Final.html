@@ -1,0 +1,120 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>CFG Analyser</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="CFG_Analyser_Final.css"/>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="logo">CFG <em>Analyser</em></div>
+    <div class="logo-sub">Context Free Grammar · CYK · Parse Tree · Ambiguity · First &amp; Follow</div>
+  </div>
+  <div id="status-pill" class="status-pill">Ready</div>
+</div>
+
+<div class="layout">
+
+  <!-- INPUT PANEL -->
+  <div class="input-panel">
+    <div>
+      <div class="field-label">Grammar (CFG)</div>
+      <textarea id="grammar-input" placeholder="S -> AB | BC&#10;A -> BA | a&#10;B -> CC | b&#10;C -> AB | a&#10;&#10;Uppercase = non-terminal&#10;Lowercase = terminal&#10;e or ε = epsilon (empty)"></textarea>
+      <div class="hint">One rule per line. Use | for alternatives. Uppercase letters are non-terminals, lowercase are terminals.</div>
+    </div>
+
+    <div>
+      <div class="field-label">Test String</div>
+      <input type="text" id="string-input" placeholder="e.g. baab  (type e for empty ε)" value="baab"/>
+      <div class="hint">Any string of terminals. Type 'e' for the empty string.</div>
+    </div>
+
+    <div>
+      <div class="speed-row">
+        <label>Speed</label>
+        <input type="range" id="speed-slider" min="1" max="5" value="1" oninput="updateSpeed(this.value)"/>
+        <span class="speed-val" id="speed-label">Very Slow</span>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-run" id="run-btn" onclick="runAnalysis()">▶ Analyse</button>
+      <button class="btn btn-clear" onclick="clearAll()">Clear</button>
+    </div>
+
+    <div id="input-error" class="err" style="display:none"></div>
+
+    <div>
+      <div class="field-label">Presets</div>
+      <div class="preset-grid">
+        <button class="preset-btn" onclick="loadPreset(0)"><span class="preset-name">CYK Textbook (Sipser)</span>S→AB|BC · A→BA|a · B→CC|b · C→AB|a</button>
+        <button class="preset-btn" onclick="loadPreset(1)"><span class="preset-name">aⁿbⁿ Language</span>S→aSb | ab</button>
+        <button class="preset-btn" onclick="loadPreset(2)"><span class="preset-name">Palindromes over {a,b}</span>S→aSa|bSb|a|b|e</button>
+        <button class="preset-btn" onclick="loadPreset(3)"><span class="preset-name">Ambiguous Grammar ⚠</span>S→SS|aSb|e</button>
+        <button class="preset-btn" onclick="loadPreset(4)"><span class="preset-name">Arithmetic Expressions</span>E→E+T|T · T→T*F|F · F→a</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- OUTPUT PANEL -->
+  <div class="output-panel" id="output-panel">
+
+    <div class="section" id="sec-grammar">
+      <div class="section-header">
+        <div class="section-num pending" id="num-grammar">G</div>
+        <div><div class="section-title">Grammar Analysis</div><div class="section-sub">Parsing your CFG — identifying variables, terminals, productions</div></div>
+      </div>
+      <div id="grammar-body"></div>
+    </div>
+
+    <div class="section" id="sec-cnf">
+      <div class="section-header">
+        <div class="section-num pending" id="num-cnf">1</div>
+        <div><div class="section-title">CNF Conversion</div><div class="section-sub">Transforming grammar into Chomsky Normal Form — required for CYK</div></div>
+      </div>
+      <div id="cnf-body"></div>
+    </div>
+
+    <div class="section" id="sec-cyk">
+      <div class="section-header">
+        <div class="section-num pending" id="num-cyk">2</div>
+        <div><div class="section-title">CYK Parser</div><div class="section-sub">Dynamic programming table filling — O(n³|G|) membership test</div></div>
+      </div>
+      <div id="cyk-body"></div>
+    </div>
+
+    <div class="section" id="sec-tree">
+      <div class="section-header">
+        <div class="section-num pending" id="num-tree">3</div>
+        <div><div class="section-title">Parse Tree</div><div class="section-sub">Derivation tree reconstructed from CYK table</div></div>
+      </div>
+      <div id="tree-body"></div>
+    </div>
+
+    <div class="section" id="sec-amb">
+      <div class="section-header">
+        <div class="section-num pending" id="num-amb">4</div>
+        <div><div class="section-title">Ambiguity Detection</div><div class="section-sub">Searching for a second distinct parse tree</div></div>
+      </div>
+      <div id="amb-body"></div>
+    </div>
+
+    <div class="section" id="sec-ff">
+      <div class="section-header">
+        <div class="section-num pending" id="num-ff">5</div>
+        <div><div class="section-title">First &amp; Follow Sets</div><div class="section-sub">Computed on original grammar</div></div>
+      </div>
+      <div id="ff-body"></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="CFG_Analyser_Final.js"></script>
+</body>
+</html>
+
