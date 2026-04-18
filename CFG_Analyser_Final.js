@@ -253,9 +253,9 @@ function renderSVGTree(treeData,container,title){
     if(pk){const par=list.find(n=>n.k===pk);if(par&&par.p){edgesHTML+=`<line id="edge-${idx}" class="ptree-edge" x1="${par.p.x+NW/2}" y1="${par.p.y+NH}" x2="${p.x+NW/2}" y2="${p.y}"/>\n`;}}
     const isNT=!node.leaf,isS=node.sym===cnfStart;
     const cx=p.x+NW/2,cy=p.y+NH/2,r=isS?18:14;
-    const fill=isS?'#e0e7ff':isNT?'#ede9fe':'#ecfdf5';
-    const stroke=isS?'#4f46e5':isNT?'#7c3aed':'#059669';
-    const tc=isS?'#3730a3':isNT?'#5b21b6':'#065f46';
+    const fill=isS?'#162a49':isNT?'#2b2250':'#123329';
+    const stroke=isS?'#5ea2ff':isNT?'#b794f4':'#34d399';
+    const tc=isS?'#d7e7ff':isNT?'#eadcff':'#c9ffe7';
     nodesHTML+=`<g id="pnode-${idx}" class="ptree-node">
       <circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="${tc}" font-size="11" font-family="var(--mono)" font-weight="${isNT?'600':'400'}">${node.sym}</text>
@@ -315,8 +315,8 @@ function showSection(id){const s=document.getElementById('sec-'+id);s.classList.
 function setNum(id,state){
   const el=document.getElementById('num-'+id);
   el.className='section-num';
-  if(state==='active')el.style.background='var(--accent)',el.style.color='#fff',el.style.border='none';
-  else if(state==='done'){el.style.background='var(--green)';el.style.color='#fff';el.style.border='none';el.innerHTML='✓';}
+  if(state==='active')el.style.background='var(--accent)',el.style.color='#09142a',el.style.border='none';
+  else if(state==='done'){el.style.background='var(--green)';el.style.color='#09142a';el.style.border='none';el.innerHTML='✓';}
   else{el.style.background='var(--bg3)';el.style.color='var(--text3)';el.style.border='1.5px solid var(--border)';}
 }
 function setStatus(text,type){const p=document.getElementById('status-pill');p.textContent=text;p.className='status-pill '+(type||'');}
@@ -686,7 +686,7 @@ async function animateCYK(cnf,str){
     if(!cell) continue;
 
     // Highlight input chars for this substring
-    for(let c=i;c<=j;c++){const ch=document.getElementById(`sc-${c}`);if(ch){ch.style.borderColor='var(--accent)';ch.style.background='#eff6ff';}}
+    for(let c=i;c<=j;c++){const ch=document.getElementById(`sc-${c}`);if(ch){ch.style.borderColor='var(--accent)';ch.style.background='var(--blue-bg)';}}
 
     // Mark cell as computing
     cell.classList.remove('empty');
