@@ -63,9 +63,12 @@ function parseGrammar(text){
     const lhs=m[1];
     if(!rules[lhs]){rules[lhs]=[];order.push(lhs);}
     for(const alt of m[2].split('|').map(a=>a.trim())){
-      if(alt==='e'||alt==='ε'){rules[lhs].push(['ε']);continue;}
-      const syms=alt.match(/[A-Z][0-9']*|[a-z+*()\[\]{}0-9]/g)||[];
-      rules[lhs].push(syms.length?syms:['ε']);
+      const rawAlt=alt.replace(/\s+/g,'');
+      if(rawAlt==='e'||rawAlt==='ε'){rules[lhs].push(['ε']);continue;}
+      const syms=rawAlt.match(/[A-Z][A-Z0-9']*|[a-z+*()\[\]{}0-9]/g)||[];
+      if(!syms.length||syms.join('')!==rawAlt)
+        throw new Error(`Invalid symbols in rule: "${lhs} -> ${alt}"`);
+      rules[lhs].push(syms);
     }
   }
   const start=order[0];
@@ -461,14 +464,17 @@ async function animateCNF(g){
   let rules=deepCopy(g.rules);
   const nts=new Set(g.nts);
   let order=[...g.order];
+  let cnfStart='S0';
+  let startIdx=0;
+  while(rules[cnfStart]||nts.has(cnfStart)){startIdx++;cnfStart=`S0_${startIdx}`;}
 
   // Stage 0: new start
   {
-    const s=makeStageCard(body,'Step 1 — New start symbol','Add S0 → '+g.start+' so the start symbol never appears on the right-hand side of any rule');
+    const s=makeStageCard(body,'Step 1 — New start symbol',`Add ${cnfStart} → ${g.start} so the start symbol never appears on the right-hand side of any rule`);
     s.setActive();s.setBadge('running');await tick();
-    const S0='S0';rules[S0]=[[g.start]];nts.add(S0);order=[S0,...order];
-    await addLogLine(s.changesId,`<span style="color:var(--accent)">NEW RULE</span> &nbsp; S0 → ${g.start}`,'added');await tick();
-    await addLogLine(s.changesId,`S0 is now the new start symbol`,'info');await tick();
+    rules[cnfStart]=[[g.start]];nts.add(cnfStart);order=[cnfStart,...order];
+    await addLogLine(s.changesId,`<span style="color:var(--accent)">NEW RULE</span> &nbsp; ${cnfStart} → ${g.start}`,'added');await tick();
+    await addLogLine(s.changesId,`${cnfStart} is now the new start symbol`,'info');await tick();
     s.setBadge('done');s.setComplete();
   }
 
@@ -489,7 +495,6 @@ async function animateCNF(g){
         for(const v of epsVariants(prod,nullable))
           if(!newRules[lhs].some(p=>arrEq(p,v)))newRules[lhs].push(v);
       }
-      if(!newRules[lhs].length)newRules[lhs]=[['ε']];
     }
     // show added rules
     for(const lhs of Object.keys(newRules))
@@ -532,10 +537,10 @@ async function animateCNF(g){
   // Stage 3: useless symbols
   {
     const gen=computeGen(rules,nts);
-    const reach=computeReach(rules,'S0',nts);
+    const reach=computeReach(rules,cnfStart,nts);
     const useful=new Set([...gen].filter(x=>reach.has(x)));
     const s=makeStageCard(body,'Step 4 — Remove useless symbols',
-      `Generating: {${[...gen].join(', ')}} &nbsp;|&nbsp; Reachable from S0: {${[...reach].join(', ')}}`);
+      `Generating: {${[...gen].join(', ')}} &nbsp;|&nbsp; Reachable from ${cnfStart}: {${[...reach].join(', ')}}`);
     s.setActive();s.setBadge('running');await tick();
     let anyUseless=false;
     for(const lhs of Object.keys(rules)){
@@ -626,7 +631,7 @@ async function animateCNF(g){
     document.getElementById(body).appendChild(finalDiv);
     await tick();
 
-    return{rules:binRules,order:binOrder,start:'S0',nts:[...nts],terms:g.terms};
+    return{rules:binRules,order:binOrder,start:cnfStart,nts:[...nts],terms:g.terms};
   }
 }
 
@@ -803,15 +808,15 @@ async function animateAmbiguity(res,str){
   const logId=makeLogContainer(body);
   await addLogLine(logId,'Parse tree 1 reconstructed from CYK table','info');await tick();
   await addLogLine(logId,'Searching for alternative derivation with different split points...','info');await tick();
-  if(isAmb) await addLogLine(logId,'<span style="color:var(--amber);font-weight:600">Second parse tree found — grammar is AMBIGUOUS</span>','highlight');
-  else await addLogLine(logId,'No second parse tree found for this string','info');
+  if(isAmb) await addLogLine(logId,'<span style="color:var(--amber);font-weight:600">Second parse tree found for this tested string</span>','highlight');
+  else await addLogLine(logId,'No second parse tree found for this tested string (not a proof of global unambiguity)','info');
   await tick();
 
   const verdict=document.createElement('div');
   verdict.className=`amb-result ${isAmb?'ambig':'unamb'}`;
   verdict.style.cssText='display:flex;align-items:center;gap:12px;padding:14px 18px;border-radius:10px;margin:10px 0';
   verdict.innerHTML=`<div style="font-size:22px">${isAmb?'⚠️':'✅'}</div>
-    <div><div class="amb-label">${isAmb?'Grammar is AMBIGUOUS':'Grammar appears UNAMBIGUOUS for this string'}</div>
+    <div><div class="amb-label">${isAmb?'Ambiguity found for this tested string':'No ambiguity found for this tested string'}</div>
     <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${isAmb?`Two distinct parse trees exist for "${str}"`:`Only one parse tree found for "${str}"`}</div></div>`;
   document.getElementById(body).appendChild(verdict);
   await tick();
