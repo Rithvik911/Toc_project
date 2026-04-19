@@ -63,12 +63,9 @@ function parseGrammar(text){
     const lhs=m[1];
     if(!rules[lhs]){rules[lhs]=[];order.push(lhs);}
     for(const alt of m[2].split('|').map(a=>a.trim())){
-      const rawAlt=alt.replace(/\s+/g,'');
-      if(rawAlt==='e'||rawAlt==='ε'){rules[lhs].push(['ε']);continue;}
-      const syms=rawAlt.match(/[A-Z][A-Z0-9']*|[a-z+*()\[\]{}0-9]/g)||[];
-      if(!syms.length||syms.join('')!==rawAlt)
-        throw new Error(`Invalid symbols in rule: "${lhs} -> ${alt}"`);
-      rules[lhs].push(syms);
+      if(alt==='e'||alt==='ε'){rules[lhs].push(['ε']);continue;}
+      const syms=alt.match(/[A-Z][0-9']*|[a-z+*()\[\]{}0-9]/g)||[];
+      rules[lhs].push(syms.length?syms:['ε']);
     }
   }
   const start=order[0];
@@ -149,6 +146,12 @@ function runCYK(cnf,str){
 // ═══════════════════════════════════════════════
 function buildTree(cnf,table,str,sym,i,j,memo={}){
   const key=`${sym},${i},${j}`;if(key in memo)return memo[key];memo[key]=null;
+  if(i>j){
+    for(const p of(cnf.rules[sym]||[]))
+      if(p.length===1&&p[0]==='ε')
+        return memo[key]={sym,children:[{sym:'ε',children:[],leaf:true}],i,j};
+    return null;
+  }
   if(i===j){for(const p of(cnf.rules[sym]||[]))if(p.length===1&&p[0]===str[i])return memo[key]={sym,children:[{sym:str[i],children:[],leaf:true}],i,j};return null;}
   for(const p of(cnf.rules[sym]||[])){
     if(p.length!==2)continue;const[B,C]=p;
@@ -161,28 +164,54 @@ function buildTree(cnf,table,str,sym,i,j,memo={}){
   }return null;
 }
 function treesEq(a,b){if(!a&&!b)return true;if(!a||!b)return false;if(a.sym!==b.sym||a.children.length!==b.children.length)return false;return a.children.every((c,i)=>treesEq(c,b.children[i]));}
-function buildTree2(cnf,table,str,sym,i,j,ft,memo={}){
-  if(i===j){for(const p of(cnf.rules[sym]||[]))if(p.length===1&&p[0]===str[i])return{sym,children:[{sym:str[i],children:[],leaf:true}],i,j};return null;}
-  const fp=ft&&ft.children.length===2?{B:ft.children[0].sym,C:ft.children[1].sym,k:ft.children[0].j}:null;
-  for(const p of(cnf.rules[sym]||[])){if(p.length!==2)continue;const[B,C]=p;
-    for(let k=i;k<j;k++){
-      if(!table[i][k].has(B)||!table[k+1][j].has(C))continue;
-      if(fp&&fp.B===B&&fp.C===C&&fp.k===k)continue;
-      const L=buildTree(cnf,table,str,B,i,k,{});const R=buildTree(cnf,table,str,C,k+1,j,{});
-      if(L&&R)return{sym,children:[L,R],i,j};
+function buildTreeVariants(cnf,table,str,sym,i,j,limit=2,memo=new Map()){
+  const key=`${sym},${i},${j}`;
+  if(memo.has(key)) return memo.get(key);
+  const results=[];
+  const addTree=tree=>{
+    if(!tree||results.some(t=>treesEq(t,tree))) return;
+    results.push(tree);
+  };
+
+  if(i>j){
+    for(const p of(cnf.rules[sym]||[])){
+      if(p.length===1&&p[0]==='ε'){
+        addTree({sym,children:[{sym:'ε',children:[],leaf:true}],i,j});
+        break;
+      }
+    }
+    memo.set(key,results);
+    return results;
+  }
+
+  if(i===j){
+    for(const p of(cnf.rules[sym]||[])){
+      if(p.length===1&&p[0]===str[i]) addTree({sym,children:[{sym:str[i],children:[],leaf:true}],i,j});
+      if(results.length>=limit) break;
+    }
+    memo.set(key,results);
+    return results;
+  }
+
+  for(const p of(cnf.rules[sym]||[])){
+    if(p.length!==2) continue;
+    const[B,C]=p;
+    for(let k=i;k<j&&results.length<limit;k++){
+      if(!table[i][k].has(B)||!table[k+1][j].has(C)) continue;
+      const leftTrees=buildTreeVariants(cnf,table,str,B,i,k,limit,memo);
+      const rightTrees=buildTreeVariants(cnf,table,str,C,k+1,j,limit,memo);
+      for(const L of leftTrees){
+        for(const R of rightTrees){
+          addTree({sym,children:[L,R],i,j});
+          if(results.length>=limit) break;
+        }
+        if(results.length>=limit) break;
+      }
     }
   }
-  for(const p of(cnf.rules[sym]||[])){if(p.length!==2)continue;const[B,C]=p;
-    for(let k=i;k<j;k++){
-      if(!table[i][k].has(B)||!table[k+1][j].has(C))continue;
-      const L2=buildTree2(cnf,table,str,B,i,k,ft?.children?.[0],{});
-      const R=buildTree(cnf,table,str,C,k+1,j,{});
-      if(L2&&R&&!treesEq(L2,ft?.children?.[0]))return{sym,children:[L2,R],i,j};
-      const L=buildTree(cnf,table,str,B,i,k,{});
-      const R2=buildTree2(cnf,table,str,C,k+1,j,ft?.children?.[1],{});
-      if(L&&R2&&!treesEq(R2,ft?.children?.[1]))return{sym,children:[L,R2],i,j};
-    }
-  }return null;
+
+  memo.set(key,results);
+  return results;
 }
 
 // ═══════════════════════════════════════════════
@@ -232,34 +261,58 @@ function computeFollow(g,first){
 // ═══════════════════════════════════════════════
 function makeSVGTree(tree,cnf){
   if(!tree) return null;
-  const NW=46,NH=34,HG=8,VG=54;
+  const labels=[];
+  (function collectLabels(node){
+    labels.push(String(node.sym||''));
+    for(const child of(node.children||[])) collectLabels(child);
+  })(tree);
+  const maxLabelLen=Math.max(1,...labels.map(s=>s.length));
+  const NW=Math.max(56,maxLabelLen*11+18);
+  const NH=38;
+  const HG=Math.max(18,Math.round(NW*0.42));
+  const VG=66;
   const pos={};let li=0;
-  const nk=n=>`${n.sym}_${n.i}_${n.j}_${n.leaf?1:0}`;
-  function layL(node){if(!node.children||!node.children.length){pos[nk(node)]={x:li*(NW+HG),y:0};li++;return;}for(const c of node.children)layL(c);}
-  function layI(node,d){if(!node.children||!node.children.length){pos[nk(node)].y=d*VG;return;}for(const c of node.children)layI(c,d+1);const xs=node.children.map(c=>pos[nk(c)].x);pos[nk(node)]={x:(Math.min(...xs)+Math.max(...xs))/2,y:d*VG};}
-  layL(tree);layI(tree,0);
+  const treeId='tree-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
+  const nk=path=>path;
+  function layL(node,path){
+    const children=node.children||[];
+    if(!children.length){pos[nk(path)]={x:li*(NW+HG),y:0};li++;return;}
+    children.forEach((c,idx)=>layL(c,`${path}.${idx}`));
+  }
+  function layI(node,path,d){
+    const children=node.children||[];
+    if(!children.length){pos[nk(path)].y=d*VG;return;}
+    children.forEach((c,idx)=>layI(c,`${path}.${idx}`,d+1));
+    const xs=children.map((_,idx)=>pos[nk(`${path}.${idx}`)].x);
+    pos[nk(path)]={x:(Math.min(...xs)+Math.max(...xs))/2,y:d*VG};
+  }
+  layL(tree,'0');layI(tree,'0',0);
   const allP=Object.values(pos);
   const W=Math.max(Math.max(...allP.map(p=>p.x))+NW+20,300);
   const H=Math.max(...allP.map(p=>p.y))+NH+30;
   const list=[];
-  function collect(node,pk=null){const k=nk(node);list.push({k,node,p:pos[k],pk});for(const c of(node.children||[]))collect(c,k);}
-  collect(tree);
-  return{list,W,H,NW,NH,cnfStart:cnf.start,nk};
+  function collect(node,path='0',pk=null){
+    const k=nk(path);
+    list.push({k,node,p:pos[k],pk,nodeId:`${treeId}-node-${k}`,edgeId:`${treeId}-edge-${k}`});
+    (node.children||[]).forEach((c,idx)=>collect(c,`${path}.${idx}`,k));
+  }
+  collect(tree,'0');
+  return{list,W,H,NW,NH,cnfStart:cnf.start,nk,treeId};
 }
 
 function renderSVGTree(treeData,container,title){
   if(!treeData){container.innerHTML=`<div style="padding:20px;color:var(--text3);font-size:12px">No parse tree available</div>`;return;}
   const{list,W,H,NW,NH,cnfStart}=treeData;
   let edgesHTML='',nodesHTML='';
-  list.forEach(({k,node,p,pk},idx)=>{
+  list.forEach(({k,node,p,pk,edgeId,nodeId},idx)=>{
     if(!p)return;
-    if(pk){const par=list.find(n=>n.k===pk);if(par&&par.p){edgesHTML+=`<line id="edge-${idx}" class="ptree-edge" x1="${par.p.x+NW/2}" y1="${par.p.y+NH}" x2="${p.x+NW/2}" y2="${p.y}"/>\n`;}}
+    if(pk){const par=list.find(n=>n.k===pk);if(par&&par.p){edgesHTML+=`<line id="${edgeId}" class="ptree-edge" x1="${par.p.x+NW/2}" y1="${par.p.y+NH}" x2="${p.x+NW/2}" y2="${p.y}"/>\n`;}}
     const isNT=!node.leaf,isS=node.sym===cnfStart;
     const cx=p.x+NW/2,cy=p.y+NH/2,r=isS?18:14;
     const fill=isS?'#162a49':isNT?'#2b2250':'#123329';
     const stroke=isS?'#5ea2ff':isNT?'#b794f4':'#34d399';
     const tc=isS?'#d7e7ff':isNT?'#eadcff':'#c9ffe7';
-    nodesHTML+=`<g id="pnode-${idx}" class="ptree-node">
+    nodesHTML+=`<g id="${nodeId}" class="ptree-node">
       <circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="${tc}" font-size="11" font-family="var(--mono)" font-weight="${isNT?'600':'400'}">${node.sym}</text>
     </g>\n`;
@@ -275,8 +328,8 @@ function renderSVGTree(treeData,container,title){
 async function animateTree(list, containerId){
   for(let idx=0;idx<list.length;idx++){
     if(abortFlag) throw new Error('__ABORTED__');
-    const edge=document.getElementById('edge-'+idx);
-    const node=document.getElementById('pnode-'+idx);
+    const edge=document.getElementById(list[idx].edgeId);
+    const node=document.getElementById(list[idx].nodeId);
     if(edge) edge.classList.add('show');
     if(node) node.classList.add('show');
     // show next button with info about what node just appeared
@@ -299,12 +352,15 @@ async function animateTree(list, containerId){
 function getDerivation(tree){
   const steps=[tree.sym];
   function step(node,sent){
-    if(!node||node.leaf)return;
-    const cs=node.children.map(c=>c.sym);
-    const idx=sent.indexOf(node.sym);if(idx<0)return;
-    const next=[...sent.slice(0,idx),...cs,...sent.slice(idx+1)];
-    steps.push(next.join(' '));
-    for(const c of node.children)step(c,next);
+    if(!node||node.leaf)return sent;
+    const idx=sent.indexOf(node.sym);if(idx<0)return sent;
+    const replacement=node.children.map(c=>c.sym);
+    const next=[...sent.slice(0,idx),...replacement,...sent.slice(idx+1)];
+    const nextStr=next.join(' ');
+    if(steps[steps.length-1]!==nextStr)steps.push(nextStr);
+    let cur=next;
+    for(const c of node.children)cur=step(c,cur);
+    return cur;
   }
   step(tree,[tree.sym]);
   const uniq=[];for(const s of steps)if(!uniq.length||uniq[uniq.length-1]!==s)uniq.push(s);
@@ -385,7 +441,7 @@ async function runAnalysis(){
   setStatus('Running...','running');
 
   // reset all sections
-  ['grammar','cnf','cyk','tree','amb','ff'].forEach(id=>{
+  ['grammar','cnf','cyk','tree','amb'].forEach(id=>{
     document.getElementById('sec-'+id).classList.remove('visible');
     setNum(id,'pending');
     document.getElementById(id==='grammar'?'grammar-body':id+'-body').innerHTML='';
@@ -440,12 +496,6 @@ async function runAnalysis(){
   await animateAmbiguity(cykRes,str);
   setNum('amb','done');
 
-  // ─── SECTION 5: First & Follow ───
-  showSection('ff');setNum('ff','active');
-  await tick();
-  await animateFF(G);
-  setNum('ff','done');
-
   running=false;
   document.getElementById('run-btn').disabled=false;
   setStatus('Complete','done');
@@ -464,17 +514,29 @@ async function animateCNF(g){
   let rules=deepCopy(g.rules);
   const nts=new Set(g.nts);
   let order=[...g.order];
-  let cnfStart='S0';
-  let startIdx=0;
-  while(rules[cnfStart]||nts.has(cnfStart)){startIdx++;cnfStart=`S0_${startIdx}`;}
+  const freshCounter={};
+  const freshNT=(base)=>{
+    let cand=base;
+    if(!nts.has(cand)&&!rules[cand]) return cand;
+    const key=base;
+    freshCounter[key]=(freshCounter[key]||0)+1;
+    cand=`${base}_${freshCounter[key]}`;
+    while(nts.has(cand)||rules[cand]){
+      freshCounter[key]++;
+      cand=`${base}_${freshCounter[key]}`;
+    }
+    return cand;
+  };
+  let startSym='S0';
 
   // Stage 0: new start
   {
-    const s=makeStageCard(body,'Step 1 — New start symbol',`Add ${cnfStart} → ${g.start} so the start symbol never appears on the right-hand side of any rule`);
+    startSym=freshNT('S0');
+    const s=makeStageCard(body,'Step 1 — New start symbol',`Add ${startSym} → ${g.start} so the start symbol never appears on the right-hand side of any rule`);
     s.setActive();s.setBadge('running');await tick();
-    rules[cnfStart]=[[g.start]];nts.add(cnfStart);order=[cnfStart,...order];
-    await addLogLine(s.changesId,`<span style="color:var(--accent)">NEW RULE</span> &nbsp; ${cnfStart} → ${g.start}`,'added');await tick();
-    await addLogLine(s.changesId,`${cnfStart} is now the new start symbol`,'info');await tick();
+    rules[startSym]=[[g.start]];nts.add(startSym);order=[startSym,...order];
+    await addLogLine(s.changesId,`<span style="color:var(--accent)">NEW RULE</span> &nbsp; ${startSym} → ${g.start}`,'added');await tick();
+    await addLogLine(s.changesId,`${startSym} is now the new start symbol`,'info');await tick();
     s.setBadge('done');s.setComplete();
   }
 
@@ -495,6 +557,10 @@ async function animateCNF(g){
         for(const v of epsVariants(prod,nullable))
           if(!newRules[lhs].some(p=>arrEq(p,v)))newRules[lhs].push(v);
       }
+      // In CNF, only the start symbol may retain ε if language contains empty string.
+      if(lhs===startSym&&nullable.has(startSym)&&!newRules[lhs].some(p=>p.length===1&&p[0]==='ε'))
+        newRules[lhs].push(['ε']);
+      if(!newRules[lhs].length) delete newRules[lhs];
     }
     // show added rules
     for(const lhs of Object.keys(newRules))
@@ -502,7 +568,10 @@ async function animateCNF(g){
         if(!rules[lhs]||!rules[lhs].some(p=>arrEq(p,prod))){
           await addLogLine(s.changesId,`<span style="color:var(--green)">ADD</span> &nbsp; ${lhs} → ${prod.join(' ')}`,'added');await tick();
         }
+    if(nullable.has(startSym))
+      await addLogLine(s.changesId,`Retained ${startSym} → ε because start symbol is nullable`,'info');
     if(!nullable.size) await addLogLine(s.changesId,'No ε-productions found — grammar unchanged','info');
+    order=order.filter(lhs=>newRules[lhs]);
     rules=newRules;s.setBadge('done');s.setComplete();
   }
 
@@ -510,26 +579,51 @@ async function animateCNF(g){
   {
     const s=makeStageCard(body,'Step 3 — Remove unit productions','A unit production is A → B where B is a single non-terminal. Replace each by copying B\'s rules directly into A.');
     s.setActive();s.setBadge('running');await tick();
-    let changed=true;let anyChange=false;
-    while(changed){changed=false;
-      for(const lhs of Object.keys(rules)){
-        const toRem=[],toAdd=[];
-        for(const prod of rules[lhs]){
-          if(prod.length===1&&nts.has(prod[0])){
-            const tgt=prod[0];toRem.push(prod);
-            await addLogLine(s.changesId,`<span style="color:var(--red)">REMOVE</span> &nbsp; ${lhs} → ${tgt} &nbsp; (unit production)`,'removed');await tick();
-            for(const p of(rules[tgt]||[]))
-              if(!(p.length===1&&nts.has(p[0]))&&!rules[lhs].some(r=>arrEq(r,p))&&!toAdd.some(r=>arrEq(r,p))){
-                toAdd.push(p);
-                await addLogLine(s.changesId,`<span style="color:var(--green)">ADD</span> &nbsp; ${lhs} → ${p.join(' ')} &nbsp; (copied from ${tgt})`,'added');await tick();
-              }
-            changed=true;anyChange=true;
+    let anyChange=false;
+    const keys=Object.keys(rules);
+    const isUnit=p=>p.length===1&&nts.has(p[0]);
+    const closure={};
+    for(const lhs of keys){
+      const seen=new Set([lhs]);
+      const q=[lhs];
+      while(q.length){
+        const cur=q.shift();
+        for(const p of(rules[cur]||[])){
+          if(!isUnit(p)) continue;
+          const tgt=p[0];
+          if(!seen.has(tgt)){seen.add(tgt);q.push(tgt);}
+        }
+      }
+      closure[lhs]=seen;
+    }
+
+    const newRules={};
+    for(const lhs of keys){
+      newRules[lhs]=[];
+      const originalNonUnit=(rules[lhs]||[]).filter(p=>!isUnit(p));
+
+      for(const p of(rules[lhs]||[])){
+        if(isUnit(p)){
+          anyChange=true;
+          await addLogLine(s.changesId,`<span style="color:var(--red)">REMOVE</span> &nbsp; ${lhs} → ${p[0]} &nbsp; (unit production)`,'removed');
+          await tick();
+        }
+      }
+
+      for(const src of closure[lhs]){
+        for(const p of(rules[src]||[])){
+          if(isUnit(p)) continue;
+          if(newRules[lhs].some(r=>arrEq(r,p))) continue;
+          newRules[lhs].push(p);
+          const existedOriginally=originalNonUnit.some(r=>arrEq(r,p));
+          if(!existedOriginally){
+            await addLogLine(s.changesId,`<span style="color:var(--green)">ADD</span> &nbsp; ${lhs} → ${p.join(' ')} &nbsp; (via unit-closure from ${src})`,'added');
+            await tick();
           }
         }
-        rules[lhs]=rules[lhs].filter(p=>!toRem.some(r=>arrEq(r,p)));
-        rules[lhs].push(...toAdd);
       }
     }
+    rules=newRules;
     if(!anyChange)await addLogLine(s.changesId,'No unit productions found — grammar unchanged','info');
     s.setBadge('done');s.setComplete();
   }
@@ -537,10 +631,10 @@ async function animateCNF(g){
   // Stage 3: useless symbols
   {
     const gen=computeGen(rules,nts);
-    const reach=computeReach(rules,cnfStart,nts);
+    const reach=computeReach(rules,startSym,nts);
     const useful=new Set([...gen].filter(x=>reach.has(x)));
     const s=makeStageCard(body,'Step 4 — Remove useless symbols',
-      `Generating: {${[...gen].join(', ')}} &nbsp;|&nbsp; Reachable from ${cnfStart}: {${[...reach].join(', ')}}`);
+      `Generating: {${[...gen].join(', ')}} &nbsp;|&nbsp; Reachable from ${startSym}: {${[...reach].join(', ')}}`);
     s.setActive();s.setBadge('running');await tick();
     let anyUseless=false;
     for(const lhs of Object.keys(rules)){
@@ -571,7 +665,7 @@ async function animateCNF(g){
           const np=prod.map(sym=>{
             if(nts.has(sym)||sym==='ε')return sym;
             if(!termMap[sym]){
-              const tn='T'+sym.toUpperCase()+(Object.keys(termMap).length+1);
+              const tn=freshNT('T');
               termMap[sym]=tn;termRules[tn]=[[sym]];termOrder.push(tn);nts.add(tn);
               newNTs.push({tn,sym});anyIsolated=true;
             }
@@ -600,19 +694,25 @@ async function animateCNF(g){
     for(const lhs of order){
       for(const prod of rules[lhs]){
         if(prod.length<=2){binRules[lhs].push(prod);continue;}
-        let cur=[...prod];let curLhs=lhs;let first=true;
-        while(cur.length>2){
-          const rest=cur.slice(1);
-          const xn='X'+binCtr++;
+        anyBin=true;
+        let curLhs=lhs;
+        let rem=[...prod];
+        while(rem.length>2){
+          const xn=freshNT('X');
           binRules[xn]=[];binOrder.push(xn);nts.add(xn);
-          if(first){
-            binRules[lhs].push([cur[0],xn]);
-            await addLogLine(s.changesId,`<span style="color:var(--amber)">MODIFY</span> &nbsp; ${lhs} → ${cur[0]} ${xn}`,'changed');anyBin=true;
-          }
-          await addLogLine(s.changesId,`<span style="color:var(--green)">ADD</span> &nbsp; ${xn} → ${rest.join(' ')}`,'added');
-          first=false;cur=rest;curLhs=xn;await tick();
+          const rhs=[rem[0],xn];
+          binRules[curLhs].push(rhs);
+          await addLogLine(
+            s.changesId,
+            `<span style="color:${curLhs===lhs?'var(--amber)':'var(--green)'}">${curLhs===lhs?'MODIFY':'ADD'}</span> &nbsp; ${curLhs} → ${rhs.join(' ')}`,
+            curLhs===lhs?'changed':'added'
+          );
+          curLhs=xn;
+          rem=rem.slice(1);
+          await tick();
         }
-        binRules[curLhs].push(cur);
+        binRules[curLhs].push(rem);
+        await addLogLine(s.changesId,`<span style="color:var(--green)">ADD</span> &nbsp; ${curLhs} → ${rem.join(' ')}`,'added');
       }
     }
     if(!anyBin)await addLogLine(s.changesId,'All rules already binary — nothing to do','info');
@@ -631,7 +731,7 @@ async function animateCNF(g){
     document.getElementById(body).appendChild(finalDiv);
     await tick();
 
-    return{rules:binRules,order:binOrder,start:cnfStart,nts:[...nts],terms:g.terms};
+    return{rules:binRules,order:binOrder,start:startSym,nts:[...nts],terms:g.terms};
   }
 }
 
@@ -750,7 +850,7 @@ async function animateCYK(cnf,str){
 // ═══════════════════════════════════════════════
 async function animateParseTree(res,str){
   const body='tree-body';
-  if(!res.accepts||res.n===0){
+  if(!res.accepts){
     document.getElementById(body).innerHTML=`<div class="verdict rej"><div class="v-icon">❌</div><div><div class="v-title">No parse tree</div><div class="v-sub">String not accepted — no derivation exists</div></div></div>`;return;
   }
   const sa=str.split('');
@@ -765,8 +865,8 @@ async function animateParseTree(res,str){
   document.getElementById(body).appendChild(wrap);
   renderSVGTree(treeData,wrap,'');
 
-  // animate nodes one by one with Next button
-  await animateTree(treeData.list, body);
+  // Reveal the tree automatically so the full structure is visible immediately.
+  await animateTree(treeData.list, null);
   await tick();
 
   // Derivation steps — each appears on Next click
@@ -794,29 +894,30 @@ async function animateParseTree(res,str){
 // ═══════════════════════════════════════════════
 async function animateAmbiguity(res,str){
   const body='amb-body';
-  if(!res.accepts||res.n===0){
+  if(!res.accepts){
     document.getElementById(body).innerHTML=`<div style="font-size:12px;color:var(--text3);font-family:var(--mono);padding:8px 0">Ambiguity check requires an accepted string</div>`;return;
   }
   makeComputing(body,'Searching for a second distinct parse tree');
   await tick();
   const sa=str.split('');
-  const t1=buildTree(cnfG,res.table,sa,cnfG.start,0,sa.length-1,{});
-  const t2=buildTree2(cnfG,res.table,sa,cnfG.start,0,sa.length-1,t1,{});
-  const isAmb=t2!==null&&!treesEq(t1,t2);
+  const trees=buildTreeVariants(cnfG,res.table,sa,cnfG.start,0,sa.length-1,2);
+  const t1=trees[0]||null;
+  const t2=trees[1]||null;
+  const isAmb=!!(t1&&t2);
   removeComputing(body);
 
   const logId=makeLogContainer(body);
   await addLogLine(logId,'Parse tree 1 reconstructed from CYK table','info');await tick();
   await addLogLine(logId,'Searching for alternative derivation with different split points...','info');await tick();
-  if(isAmb) await addLogLine(logId,'<span style="color:var(--amber);font-weight:600">Second parse tree found for this tested string</span>','highlight');
-  else await addLogLine(logId,'No second parse tree found for this tested string (not a proof of global unambiguity)','info');
+  if(isAmb) await addLogLine(logId,'<span style="color:var(--amber);font-weight:600">Second parse tree found — grammar is AMBIGUOUS</span>','highlight');
+  else await addLogLine(logId,'No second parse tree found for this string','info');
   await tick();
 
   const verdict=document.createElement('div');
   verdict.className=`amb-result ${isAmb?'ambig':'unamb'}`;
   verdict.style.cssText='display:flex;align-items:center;gap:12px;padding:14px 18px;border-radius:10px;margin:10px 0';
   verdict.innerHTML=`<div style="font-size:22px">${isAmb?'⚠️':'✅'}</div>
-    <div><div class="amb-label">${isAmb?'Ambiguity found for this tested string':'No ambiguity found for this tested string'}</div>
+    <div><div class="amb-label">${isAmb?'Grammar is AMBIGUOUS':'Grammar appears UNAMBIGUOUS for this string'}</div>
     <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${isAmb?`Two distinct parse trees exist for "${str}"`:`Only one parse tree found for "${str}"`}</div></div>`;
   document.getElementById(body).appendChild(verdict);
   await tick();
